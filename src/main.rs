@@ -1,6 +1,6 @@
 use std::{
     io::{BufRead, BufReader},
-    process::{Child, ChildStdout, Command, Stdio},
+    process::{Child, ChildStdout, Command, Stdio}, time::Duration,
 };
 
 use audio::{get_audio_data, YOUTUBE_TS_SAMPLE_RATE};
@@ -10,6 +10,8 @@ use cpal::{
     SampleFormat, SampleRate,
 };
 use ringbuf::{HeapRb, LocalRb};
+use tokio::{task::{self, JoinHandle}, time};
+use youtube_chat::{live_chat::LiveChatClientBuilder, item::{ChatItem, MessageItem}};
 
 mod audio;
 
@@ -21,7 +23,8 @@ struct Args {
     url: String,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let (mut child, stdout) = get_yt_dlp_stdout(args.url.as_ref());
     let mut reader = BufReader::new(stdout);
@@ -70,6 +73,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let startup_target_size = YOUTUBE_TS_SAMPLE_RATE as usize * 2 * 5;
     let mut startup_buffer: Vec<f32> = vec![];
 
+    let chat_stream_handle = chat_streaming(args.url.as_ref()).await;
+
     // get youtube streaming
     loop {
         let buf = reader.fill_buf().unwrap();
@@ -81,12 +86,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ts_prod.push_slice(buf);
 
         if ts_prod.is_full() || ts_prod.len() >= 64 * 1024 {
-            println!("parsing {:.2}kb ts file", ts_prod.len() as f32 / 1024.0);
             let audio_data = ts_cons.pop_iter().collect::<Vec<u8>>();
 
             if let Ok(audio_data) = get_audio_data(&audio_data) {
-                println!("get {:.2}kb audio data", audio_data.len() as f32 / 1024.0);
-
                 if !startup_buffer_flag {
                     prod.push_slice(&audio_data);
                 } else {
@@ -105,6 +107,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     child.kill().expect("failed to kill yt-dlp process");
+    let _ = chat_stream_handle.await;
     Ok(())
 }
 
@@ -123,4 +126,42 @@ fn get_yt_dlp_stdout(url: &str) -> (Child, ChildStdout) {
     let stdout = child.stdout.take().expect("invalid stdout stream");
 
     (child, stdout)
+}
+
+async fn chat_streaming(url: &str) -> JoinHandle<()> {
+    let on_chat = |chat_item: ChatItem| {
+        if let Some(name) = chat_item.author.name {
+            chat_item.message.into_iter().for_each(|message| {
+                if let MessageItem::Text(text) = message {
+                    println!("{}: {}", name, text);
+                }
+            })
+        };
+    };
+
+    let on_error = |e: anyhow::Error| eprintln!("error: {}", e);
+
+    let mut client = if url.starts_with("https") {
+        LiveChatClientBuilder::new()
+            .url(url)
+            .unwrap()
+            .on_chat(on_chat)
+            .on_error(on_error)
+            .build()
+    } else {
+        LiveChatClientBuilder::new()
+            .live_id(url.to_string())
+            .on_chat(on_chat)
+            .on_error(on_error)
+            .build()
+    };
+
+    client.start().await.unwrap();
+    task::spawn(async move {
+        let mut interval = time::interval(Duration::from_millis(3000));
+        loop {
+            interval.tick().await;
+            client.execute().await;
+        }
+    })
 }
