@@ -114,7 +114,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn get_yt_dlp_stdout(url: &str) -> (Child, ChildStdout) {
     let mut cmd = Command::new("yt-dlp");
     cmd.arg(url)
-        .args(["-f", "w"])
+        .args(["-S", "+size,+br,res"])
+        .args(["--compat-options", "no-direct-merge"])
         .args(["--quiet"])
         .args(["-o", "-"]);
 
