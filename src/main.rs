@@ -1,17 +1,26 @@
 use std::{
     io::{BufRead, BufReader},
-    process::{Child, ChildStdout, Command, Stdio}, time::Duration,
+    mem::MaybeUninit,
+    process::{Child, ChildStdout, Command, Stdio},
+    sync::Arc,
+    time::Duration,
 };
 
 use audio::{get_audio_data, YOUTUBE_TS_SAMPLE_RATE};
 use clap::{arg, command, Parser};
 use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
-    SampleFormat, SampleRate,
+    Device, SampleFormat, SampleRate, Stream, SupportedStreamConfig,
 };
-use ringbuf::{HeapRb, LocalRb};
-use tokio::{task::{self, JoinHandle}, time};
-use youtube_chat::{live_chat::LiveChatClientBuilder, item::{ChatItem, MessageItem}};
+use ringbuf::{Consumer, HeapRb, LocalRb, SharedRb};
+use tokio::{
+    task::{self, JoinHandle},
+    time,
+};
+use youtube_chat::{
+    item::{ChatItem, MessageItem},
+    live_chat::LiveChatClientBuilder,
+};
 
 mod audio;
 
@@ -29,44 +38,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (mut child, stdout) = get_yt_dlp_stdout(args.url.as_ref());
     let mut reader = BufReader::new(stdout);
 
-    let host = cpal::default_host();
-    let device = host.default_output_device().unwrap();
-    let mut supported_configs_range = device
-        .supported_output_configs()
-        .expect("error while querying configs");
-
-    let target_sample_rate = SampleRate(YOUTUBE_TS_SAMPLE_RATE);
-    let config = supported_configs_range
-        .find(|config| {
-            config.max_sample_rate() > target_sample_rate
-                && config.min_sample_rate() < target_sample_rate
-                && config.sample_format() == SampleFormat::F32
-                && config.channels() == 2
-        })
-        .expect("no supported config found")
-        .with_sample_rate(target_sample_rate);
-
     // 15sec audio sample buffer
     let rb_len = YOUTUBE_TS_SAMPLE_RATE as usize * 2 * 20;
     let rb = HeapRb::<f32>::new(rb_len);
-    let (mut prod, mut cons) = rb.split();
+    let (mut prod, cons) = rb.split();
 
     // 256kb ts buffer
     let rb_len = 256 * 1024;
     let rb = LocalRb::<u8, Vec<_>>::new(rb_len);
     let (mut ts_prod, mut ts_cons) = rb.split();
 
-    let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
-    let stream = device.build_output_stream(
-        &config.into(),
-        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            let written = cons.pop_slice(data);
-            data[written..].iter_mut().for_each(|s| *s = 0.0);
-        },
-        err_fn,
-        None,
-    )?;
-    stream.play()?;
+    let (device, config) = get_output_device_and_config();
+    let stream = output_stream(device, config, cons).unwrap();
 
     // 3sec startup buffer
     let mut startup_buffer_flag = true;
@@ -106,9 +89,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         reader.consume(len);
     }
 
+    stream.pause()?;
     child.kill().expect("failed to kill yt-dlp process");
     let _ = chat_stream_handle.await;
     Ok(())
+}
+
+fn get_output_device_and_config() -> (Device, SupportedStreamConfig) {
+    let host = cpal::default_host();
+    let device = host.default_output_device().unwrap();
+    let mut supported_configs_range = device
+        .supported_output_configs()
+        .expect("error while querying configs");
+
+    let target_sample_rate = SampleRate(YOUTUBE_TS_SAMPLE_RATE);
+    let config = supported_configs_range
+        .find(|config| {
+            config.max_sample_rate() > target_sample_rate
+                && config.min_sample_rate() < target_sample_rate
+                && config.sample_format() == SampleFormat::F32
+                && config.channels() == 2
+        })
+        .expect("no supported config found")
+        .with_sample_rate(target_sample_rate);
+
+    (device, config)
 }
 
 fn get_yt_dlp_stdout(url: &str) -> (Child, ChildStdout) {
@@ -129,33 +134,47 @@ fn get_yt_dlp_stdout(url: &str) -> (Child, ChildStdout) {
     (child, stdout)
 }
 
+type RbConsumer = Consumer<f32, Arc<SharedRb<f32, Vec<MaybeUninit<f32>>>>>;
+fn output_stream(
+    device: Device,
+    config: SupportedStreamConfig,
+    mut cons: RbConsumer,
+) -> Result<Stream, anyhow::Error> {
+    let err_fn = |err| eprintln!("an error occurred on stream: {}", err);
+
+    let stream = device.build_output_stream(
+        &config.into(),
+        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+            let written = cons.pop_slice(data);
+            data[written..].iter_mut().for_each(|s| *s = 0.0);
+        },
+        err_fn,
+        None,
+    )?;
+    stream.play()?;
+
+    Ok(stream)
+}
+
 async fn chat_streaming(url: &str) -> JoinHandle<()> {
-    let on_chat = |chat_item: ChatItem| {
-        if let Some(name) = chat_item.author.name {
-            chat_item.message.into_iter().for_each(|message| {
-                if let MessageItem::Text(text) = message {
-                    println!("{}: {}", name, text);
-                }
-            })
-        };
-    };
-
-    let on_error = |e: anyhow::Error| eprintln!("error: {}", e);
-
-    let mut client = if url.starts_with("https") {
-        LiveChatClientBuilder::new()
-            .url(url)
-            .unwrap()
-            .on_chat(on_chat)
-            .on_error(on_error)
-            .build()
+    let builder = if url.starts_with("https") {
+        LiveChatClientBuilder::new().url(url).unwrap()
     } else {
-        LiveChatClientBuilder::new()
-            .live_id(url.to_string())
-            .on_chat(on_chat)
-            .on_error(on_error)
-            .build()
+        LiveChatClientBuilder::new().live_id(url.to_string())
     };
+
+    let mut client = builder
+        .on_chat(|chat_item: ChatItem| {
+            if let Some(name) = chat_item.author.name {
+                chat_item.message.into_iter().for_each(|message| {
+                    if let MessageItem::Text(text) = message {
+                        println!("{}: {}", name, text);
+                    }
+                })
+            };
+        })
+        .on_error(|e: anyhow::Error| eprintln!("error: {}", e))
+        .build();
 
     client.start().await.unwrap();
     task::spawn(async move {
