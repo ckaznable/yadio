@@ -12,3 +12,4 @@ ringbuf = "0.3.3"
 youtube_chat = "0.1.4"
 tokio = { version = "1.28.2", features = ["full"] }
 anyhow = "1.0.71"
+owo-colors = "3.5.0"

@@ -12,6 +12,7 @@ use cpal::{
     traits::{DeviceTrait, HostTrait, StreamTrait},
     Device, SampleFormat, SampleRate, Stream, SupportedStreamConfig,
 };
+use owo_colors::OwoColorize;
 use ringbuf::{Consumer, HeapRb, LocalRb, SharedRb};
 use tokio::{
     task::{self, JoinHandle},
@@ -168,7 +169,7 @@ async fn chat_streaming(url: &str) -> JoinHandle<()> {
             if let Some(name) = chat_item.author.name {
                 chat_item.message.into_iter().for_each(|message| {
                     if let MessageItem::Text(text) = message {
-                        println!("{}: {}", name, text);
+                        println!("{}: {}", name.yellow(), text);
                     }
                 })
             };
