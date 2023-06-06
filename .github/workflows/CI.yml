@@ -49,6 +49,9 @@ jobs:
         with:
           toolchain: ${{ matrix.build || 'stable' }}
 
+      - name: Install cpal dependices
+        run: sudo apt-get install libasound2-dev -y
+
       - name: Build debug
         run: cargo build --locked
 
@@ -77,6 +80,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
+
+      - name: Install cpal dependices
+        run: sudo apt-get install libasound2-dev -y
 
       - name: Build target
         run: cargo build --release --locked --target ${{ matrix.target }}
