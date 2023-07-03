@@ -2,6 +2,10 @@
 
 Listen youtube streaming with chat in CLI.
 
+## Requirement
+
+- `yt-dlp`
+
 ## Usage
 
 ```text
