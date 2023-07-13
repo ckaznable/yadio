@@ -31,11 +31,16 @@ struct Args {
     /// youtube url or youtube video id
     #[arg()]
     url: String,
+
+    /// enable chatroom output
+    #[arg(long, default_value_t = false)]
+    chatroom: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+    let is_enable_chatroom = args.chatroom;
     let (mut child, stdout) = get_yt_dlp_stdout(args.url.as_ref());
     let mut reader = BufReader::new(stdout);
 
@@ -57,7 +62,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let startup_target_size = YOUTUBE_TS_SAMPLE_RATE as usize * 2 * 5;
     let mut startup_buffer: Vec<f32> = vec![];
 
-    let chat_stream_handle = chat_streaming(args.url.as_ref()).await;
+    let chat_stream_handle = if is_enable_chatroom {
+        Some(chat_streaming(args.url.as_ref()).await)
+    } else {
+        None
+    };
 
     // get youtube streaming
     loop {
@@ -92,7 +101,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     stream.pause()?;
     child.kill().expect("failed to kill yt-dlp process");
-    let _ = chat_stream_handle.await;
+    if let Some(handle) = chat_stream_handle {
+        handle.await?;
+    }
     Ok(())
 }
 
