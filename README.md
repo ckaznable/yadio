@@ -21,4 +21,4 @@ Options:
 
 ## LICENSE
 
-MIT
+[MIT](./LICENSE)
