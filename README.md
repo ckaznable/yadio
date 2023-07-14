@@ -34,7 +34,6 @@ yadio is written in Rust, so you'll need to grab a [Rust installation](https://w
 git clone https://github.com/ckaznable/yadio
 cd yadio
 cargo build --release
-./target/release/yadio
 ```
 
 ## Usage
