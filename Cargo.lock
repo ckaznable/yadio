@@ -2108,9 +2108,9 @@ dependencies = [
 
 [[package]]
 name = "youtube_chat"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91f6effeac12586f299a1c15e8f5c202831eb31dd0fc3d15f8284976641553a5"
+checksum = "63b88df4591220790e11b146609cad65715cc4a11337bde19c72be9eb13d3f1d"
 dependencies = [
  "anyhow",
  "chrono",
