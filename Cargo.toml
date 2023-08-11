@@ -14,7 +14,7 @@ clap = { version = "4.3.0", features = ["derive"] }
 cpal = "0.15.2"
 yt_tsu = "0.1.0"
 ringbuf = "0.3.3"
-youtube_chat = "0.2.0"
+youtube_chat = "0.2.1"
 tokio = { version = "1.28.2", features = ["full"] }
 anyhow = "1.0.71"
 owo-colors = "3.5.0"

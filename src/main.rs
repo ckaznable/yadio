@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3sec startup buffer
     let mut startup_buffer_flag = true;
-    let startup_target_size = YOUTUBE_TS_SAMPLE_RATE as usize * 2 * 5;
+    let startup_target_size = YOUTUBE_TS_SAMPLE_RATE as usize * 16 * 2 * 10 / 8;
     let mut startup_buffer: Vec<f32> = vec![];
 
     let chat_stream_handle = if is_enable_chatroom {
@@ -70,6 +70,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // get youtube streaming
     loop {
+        if prod.is_empty() && startup_buffer.is_empty() {
+            startup_buffer_flag = true;
+        }
+
         let buf = reader.fill_buf().unwrap();
         if buf.is_empty() {
             break;
@@ -78,7 +82,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let len = buf.len();
         ts_prod.push_slice(buf);
 
-        if ts_prod.is_full() || ts_prod.len() >= 64 * 1024 {
+        if ts_prod.is_full() || ts_prod.len() >= 32 * 1024 {
             let audio_data = ts_cons.pop_iter().collect::<Vec<u8>>();
 
             if let Ok(audio_data) = get_audio_data(&audio_data) {
@@ -131,7 +135,7 @@ fn get_output_device_and_config() -> (Device, SupportedStreamConfig) {
 fn get_yt_dlp_stdout(url: &str) -> (Child, ChildStdout) {
     let mut cmd = Command::new("yt-dlp");
     cmd.arg(url)
-        .args(["-S", "+size,+br,res"])
+        .args(["-f", "w"])
         .args(["--compat-options", "no-direct-merge"])
         .args(["--quiet"])
         .args(["-o", "-"]);
@@ -185,12 +189,12 @@ async fn chat_streaming(url: &str) -> JoinHandle<()> {
                 })
             };
         })
-        .on_error(|e: anyhow::Error| eprintln!("error: {}", e))
+        .on_error(|_| {})
         .build();
 
     client.start().await.unwrap();
     task::spawn(async move {
-        let mut interval = time::interval(Duration::from_millis(3000));
+        let mut interval = time::interval(Duration::from_millis(5000));
         loop {
             interval.tick().await;
             client.execute().await;
