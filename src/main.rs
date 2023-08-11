@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 3sec startup buffer
     let mut startup_buffer_flag = true;
-    let startup_target_size = YOUTUBE_TS_SAMPLE_RATE as usize * 2 * 10;
+    let startup_target_size = YOUTUBE_TS_SAMPLE_RATE as usize * 16 * 2 * 10 / 8;
     let mut startup_buffer: Vec<f32> = vec![];
 
     let chat_stream_handle = if is_enable_chatroom {
