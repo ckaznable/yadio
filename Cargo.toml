@@ -15,7 +15,7 @@ cpal = "0.15.2"
 yt_tsu = "0.1.1"
 ringbuf = "0.3.3"
 youtube_chat = "0.2.1"
-tokio = { version = "1.28.2", features = ["full"] }
+tokio = { version = "1.38.2", features = ["full"] }
 anyhow = "1.0.71"
 owo-colors = "3.5.0"
 
